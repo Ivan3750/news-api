@@ -1,9 +1,17 @@
+
+# --- Fix for feedparser on Python 3.13 (cgi removed) ---
+import sys, types
+if "cgi" not in sys.modules:
+    cgi = types.ModuleType("cgi")
+    cgi.parse_header = lambda value: (value, {})
+    sys.modules["cgi"] = cgi
+# -------------------------------------------------------
+
+import feedparser
 import os
 import time
 import random
 from datetime import datetime
-
-import feedparser
 import trafilatura
 import google.generativeai as genai
 from dotenv import load_dotenv
