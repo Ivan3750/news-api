@@ -4,8 +4,7 @@ from db import init_db, get_connection
 from scheduler import start_scheduler
 
 app = Flask(__name__)
-CORS(app, origins=["https://shortnews-xi.vercel.app/"])
-
+CORS(app)
 # --------------------------------
 # 🧭 API ендпоінти
 # --------------------------------
