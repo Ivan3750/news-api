@@ -36,7 +36,15 @@ def get_news():
 # 🏁 Старт програми
 # --------------------------------
 if __name__ == "__main__":
+    import os
+
     init_db()
     start_scheduler()
-    print("🧭 Scheduler started. API is ready at http://localhost:8000")
-    app.run(debug=True, port=8000)
+
+    # Отримуємо порт від Render або використовуємо 8000 локально
+    port = int(os.environ.get("PORT", 8000))
+    print(f"🧭 Scheduler started. API is ready at http://0.0.0.0:{port}")
+
+    # Flask повинен слухати на 0.0.0.0, інакше Render його не побачить
+    app.run(host="0.0.0.0", port=port, debug=True)
+
