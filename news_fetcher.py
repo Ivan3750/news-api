@@ -1,15 +1,15 @@
 import os
-from dotenv import load_dotenv
-import google.generativeai as genai
 import time
 import random
 from datetime import datetime
+
 import feedparser
 import trafilatura
-from dotenv import load_dotenv
 import google.generativeai as genai
-from sources import RSS_SOURCES
+from dotenv import load_dotenv
 
+from db import get_connection
+from sources import RSS_SOURCES
 # -------------------------------
 # ⚙️ CONFIG
 # -------------------------------

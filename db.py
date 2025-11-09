@@ -1,9 +1,8 @@
 import os
-from dotenv import load_dotenv
-import mysql.connector
 from mysql.connector import pooling
-load_dotenv()
+from dotenv import load_dotenv
 
+load_dotenv()
 
 dbconfig = {
     "user": os.getenv("DB_USER"),
@@ -13,7 +12,6 @@ dbconfig = {
     "database": os.getenv("DB_NAME"),
     "ssl_ca": os.getenv("DB_SSL_CA"),
 }
-
 
 connection_pool = pooling.MySQLConnectionPool(
     pool_name="mypool",
