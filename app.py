@@ -4,7 +4,7 @@ from db import init_db, get_connection
 from scheduler import start_scheduler
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000"])
+CORS(app, origins=["https://shortnews-xi.vercel.app/"])
 
 # --------------------------------
 # 🧭 API ендпоінти
@@ -18,7 +18,7 @@ def get_news():
             SELECT id, title, link, pubDate, source, shortText, created_at
             FROM news
             ORDER BY pubDate DESC, id DESC
-            LIMIT 50
+            LIMIT 150
         """)
         rows = cur.fetchall()
         cur.close()
