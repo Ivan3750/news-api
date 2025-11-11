@@ -10,6 +10,7 @@ import feedparser
 import os
 import time
 import random
+import threading
 from datetime import datetime
 import trafilatura
 import google.generativeai as genai
@@ -22,17 +23,37 @@ from sources import RSS_SOURCES
 # -------------------------------
 load_dotenv()
 
-# два ключі
 GEMINI_KEYS = [
     os.getenv("GOOGLE_API_KEY_MAIN"),
     os.getenv("GOOGLE_API_KEY_BACKUP"),
 ]
 MODEL = "gemini-2.5-flash"
 
-active_key_index = 0  # поточний ключ
+active_key_index = 0
 genai.configure(api_key=GEMINI_KEYS[active_key_index])
 model = genai.GenerativeModel(MODEL)
 
+# -------------------------------
+# ⏳ Rate limit control (Gemini safety)
+# -------------------------------
+REQUEST_HISTORY = []
+MAX_RPM = 10  # 10 запитів за хвилину — нижче ліміту
+LOCK = threading.Lock()
+
+def rate_limit_guard():
+    """Ensure we don't exceed Gemini RPM limits."""
+    with LOCK:
+        now = time.time()
+        REQUEST_HISTORY.append(now)
+
+        # Залишаємо історію лише за останню хвилину
+        while REQUEST_HISTORY and now - REQUEST_HISTORY[0] > 60:
+            REQUEST_HISTORY.pop(0)
+
+        if len(REQUEST_HISTORY) >= MAX_RPM:
+            sleep_time = 60 - (now - REQUEST_HISTORY[0]) + 1
+            print(f"🕒 Rate limit reached — sleeping for {sleep_time:.1f}s...")
+            time.sleep(sleep_time)
 
 # -------------------------------
 # 🔄 Перемикання ключа
@@ -44,7 +65,6 @@ def switch_key():
     genai.configure(api_key=new_key)
     model = genai.GenerativeModel(MODEL)
     print(f"🔑 Switched to API key {active_key_index + 1}")
-
 
 # -------------------------------
 # 📅 Безпечний парсер дати
@@ -58,7 +78,6 @@ def parse_pubdate(pubdate_str):
         except ValueError:
             continue
     return None
-
 
 # -------------------------------
 # 📰 Завантаження RSS
@@ -74,7 +93,6 @@ def fetch_rss_entries(source_name, rss_url, limit=5):
             "source": source_name,
         }
 
-
 # -------------------------------
 # 📜 Завантаження повного тексту
 # -------------------------------
@@ -83,7 +101,6 @@ def get_full_text(url):
     if downloaded:
         return trafilatura.extract(downloaded)
     return None
-
 
 # -------------------------------
 # 🤖 Підсумок через Gemini (з fallback)
@@ -96,8 +113,9 @@ def summarize_text_danish(text):
         f"{text}"
     )
 
-    for attempt in range(2):  # максимум 2 спроби (по одному ключу)
+    for attempt in range(2):
         try:
+            rate_limit_guard()  # ✅ контролюємо RPM
             response = model.generate_content(prompt)
             if response and response.text:
                 return response.text.strip()
@@ -106,14 +124,12 @@ def summarize_text_danish(text):
         except Exception as e:
             print(f"⚠️ AI fejl (attempt {attempt+1}) med key {active_key_index+1}: {e}")
             if attempt == 0:
-                # пробуємо інший ключ
                 switch_key()
                 time.sleep(1)
             else:
                 print("❌ Both keys failed — skipping this news item.")
                 return "Kunne ikke generere resumé."
     return "Kunne ikke generere resumé."
-
 
 # -------------------------------
 # 🏷️ Визначення категорії
@@ -125,29 +141,25 @@ def classify_category_danish(text):
     prompt = (
         "Læs denne danske nyhedsartikel og bestem, hvilken kategori den tilhører. "
         "Vælg KUN én af følgende kategorier:\n\n"
-        "Alle, Politik, Økonomi, Sport, Miljø, Teknologi.\n\n"
+        "Politik, Økonomi, Sport, Miljø, Teknologi.\n\n"
         "Svar KUN med navnet på kategorien uden forklaring.\n\n"
         f"Artikel:\n{text}"
     )
 
     for attempt in range(2):
         try:
+            rate_limit_guard()  # ✅ контролюємо RPM
             response = model.generate_content(prompt)
             if not response or not response.text:
                 raise ValueError("Empty response")
 
             cat = response.text.strip()
-            # очистимо від лапок і пробілів
             cat = cat.replace('"', '').replace("'", "").strip()
 
-            # перевіримо, чи категорія валідна
             for c in categories:
                 if c.lower() in cat.lower():
                     return c
-
-            # якщо не впізнали
             return "Alle"
-
         except Exception as e:
             print(f"⚠️ Category AI fejl (attempt {attempt+1}) med key {active_key_index+1}: {e}")
             if attempt == 0:
@@ -156,9 +168,7 @@ def classify_category_danish(text):
             else:
                 print("❌ Both keys failed for category — fallback to 'Alle'.")
                 return "Alle"
-
     return "Alle"
-
 
 # -------------------------------
 # 💾 Збереження у базу даних
@@ -172,7 +182,7 @@ def save_to_db(news_list):
     for news in news_list:
         cur.execute("SELECT id FROM news WHERE link = %s", (news["link"],))
         if cur.fetchone():
-            continue  # уникаємо дублікатів
+            continue
 
         cur.execute("""
             INSERT INTO news (title, link, pubDate, source, shortText, category)
@@ -191,12 +201,12 @@ def save_to_db(news_list):
     conn.close()
     print(f"🗄️ {len(news_list)} news items saved to DB.")
 
-
 # -------------------------------
 # 🔁 Оновлення всіх джерел
 # -------------------------------
 def fetch_all_news(limit=5):
     all_news = []
+    total_processed = 0
     for source_name, rss_url in RSS_SOURCES.items():
         for entry in fetch_rss_entries(source_name, rss_url, limit):
             full_text = get_full_text(entry["link"])
@@ -205,8 +215,8 @@ def fetch_all_news(limit=5):
 
             summary = summarize_text_danish(full_text)
             category = classify_category_danish(summary)
-
             pub_date = parse_pubdate(entry.get("published"))
+
             news_item = {
                 "title": entry["title"],
                 "link": entry["link"],
@@ -216,9 +226,10 @@ def fetch_all_news(limit=5):
                 "category": category,
             }
             all_news.append(news_item)
-            time.sleep(random.uniform(0.6, 1.3))  # трохи більша пауза, щоб уникнути лімітів
+            total_processed += 1
+            print(f"✅ Processed {total_processed} news so far...")
+            time.sleep(random.uniform(0.8, 1.6))  # трохи більша пауза для безпеки
     return all_news
-
 
 # -------------------------------
 # 🧠 Головна функція
